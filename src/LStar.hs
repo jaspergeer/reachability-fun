@@ -1,6 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 
 module LStar where
+
 import Data.Set (Set)
 
 type Name = String
@@ -20,13 +21,12 @@ data Term
     | Deref Term
     | Assign Term Term
 
-data Literal = IntLit Int | UnitLit
+data Literal = IntLit Int | UnitLit deriving (Eq)
 
-data QualifiedType = QualifiedType {t :: Type, reachable :: Maybe (Set Name)}
+data QualifiedType = QualifiedType {t :: Type, q :: Maybe (Set Name)} deriving (Eq)
 
 data Type
-    = Unit
-    | Int
+    = Base Base
     | Ref Type
     | Fun
         { funName :: Name
@@ -34,3 +34,6 @@ data Type
         , paramType :: QualifiedType
         , returnType :: QualifiedType
         }
+    deriving (Eq)
+
+data Base = Unit | Int deriving (Eq)

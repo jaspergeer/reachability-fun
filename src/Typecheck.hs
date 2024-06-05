@@ -34,8 +34,42 @@ Nothing ⊑ _ = True
 _ ⊑ Nothing = False
 (Just q₁) ⊑ (Just q₂) = Set.isSubsetOf q₁ q₂
 
-(<:) :: L.QualifiedType -> L.QualifiedType -> Bool
-t₁ <: t₂ = undefined
+-- TODO anytime we check if two types are equal really we should be doing this
+(<:) :: L.QualifiedType -> L.QualifiedType -> (Map Name L.QualifiedType -> Bool)
+τ₁ <: τ₂ = case (τ₁.t, τ₂.t) of
+    (L.Ref t₁, L.Ref t₂) ->
+        \gamma ->
+            (untracked t₁ <: untracked t₂) gamma
+                && (τ₁.q .<: τ₂.q) gamma
+    (L.Base t₁, L.Base t₂) ->
+        \gamma ->
+            t₁ == t₂
+                && (τ₁.q .<: τ₂.q) gamma
+    (L.Fun f₁ x₁ qt₁ qt₂, L.Fun f₂ x₂ qt₃ qt₄) ->
+        \gamma ->
+            f₁ == f₂
+                && x₁ == x₂
+                && (τ₁.q .<: τ₂.q) gamma
+                && (qt₃ <: qt₁) gamma
+                && ( let gamma' =
+                            Map.union gamma $
+                                Map.fromList
+                                    [ (f₁, (τ₁{L.q = τ₁.q .+ f₁}))
+                                    , (x₁, (qt₃{L.q = qt₃.q .+ x₁}))
+                                    ]
+                      in (qt₂ <: qt₄) gamma'
+                   )
+  where
+    normalize :: Map Name L.QualifiedType -> Set Name -> Set Name
+    normalize gamma q =
+        let expand n = case Map.lookup n gamma of
+                Just (L.QualifiedType (L.Fun{}) (Just q₁)) -> if Set.isSubsetOf q₁ q then q else Set.union q q₁
+                Just _ -> q
+                Nothing -> q -- TODO maybe this should be an error
+         in mconcat $ map expand (Set.toList q)
+
+    (.<:) :: Maybe (Set Name) -> Maybe (Set Name) -> (Map Name L.QualifiedType -> Bool)
+    q₁ .<: q₂ = \gamma -> (normalize gamma <$> q₁) ⊑ (normalize gamma <$> q₂)
 
 filterEnv :: Maybe (Set Name) -> Map Name L.QualifiedType -> Map Name L.QualifiedType
 filterEnv q = Map.filter (\(L.QualifiedType _ q') -> q' ⊑ q)
@@ -46,6 +80,7 @@ untracked t = L.QualifiedType t Nothing
 tracked :: L.Type -> Set Name -> L.QualifiedType
 tracked t = L.QualifiedType t . Just
 
+-- TODO
 initEnv :: Map Name L.QualifiedType
 initEnv = Map.fromList []
 
@@ -64,8 +99,8 @@ typeOf gamma term = case term of
             foldr (⨆) Nothing
                 <$> traverse
                     ( \n -> do
-                        L.QualifiedType _ reachable <- Map.lookup n gamma
-                        return reachable
+                        L.QualifiedType _ q <- Map.lookup n gamma
+                        return q
                     )
                     (Set.toList $ fv term)
         let L.QualifiedType t₁ q₁ = paramType
@@ -83,12 +118,12 @@ typeOf gamma term = case term of
                             ]
                         )
         inferredReturnType <- typeOf gamma' body
-        if inferredReturnType <: returnType then return f' else Nothing
+        if (inferredReturnType <: returnType) gamma' then return f' else Nothing
 
 typeLiteral :: L.Literal -> L.QualifiedType
 typeLiteral lit = case lit of
-    L.IntLit _ -> untracked L.Int
-    L.UnitLit -> untracked L.Unit
+    L.IntLit _ -> untracked $ L.Base L.Int
+    L.UnitLit -> untracked $ L.Base L.Unit
 
 fv :: L.Term -> Set Name
 fv term = case term of
